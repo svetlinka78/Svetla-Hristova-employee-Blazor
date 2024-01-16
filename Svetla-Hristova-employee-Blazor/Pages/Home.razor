@@ -1,0 +1,129 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.Components.QuickGrid
+@using System.Diagnostics.Metrics;
+@using System.Globalization;
+@inject HttpClient Http
+
+<PageTitle>Pair of employees who have worked together </PageTitle>
+
+<h1>Employee Project Grid</h1>
+
+<p>
+    Create an application that identifies the pair of employees who have worked
+    together on common projects for the longest period of time.
+</p>
+
+@if (pairs == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+  
+    <QuickGrid Items="pairs.AsQueryable()" Pagination="pagination">
+        <PropertyColumn Property="f => f.ProjectID" Title="Project ID" Sortable="true" />
+        <PropertyColumn Property="f => f.EmpID1" Title="Employee ID #1" Sortable="true"/>
+        <PropertyColumn Property="f => f.EplID2" Title="Employee ID #2" Sortable="true"/>
+        <PropertyColumn Property="f => f.Overlap" Format ="0" Title="Overlap between person #1 and #2 in Days" Sortable="true"/>
+        <TemplateColumn>
+            <div>
+                <span> @if (context.MaxOverlap)
+                    {
+                        <p><red>this is maximum overlap per project ID  @context.ProjectID</red></p>
+                    }</span>
+            </div>
+        </TemplateColumn>
+    </QuickGrid>
+}
+
+@code {
+    PaginationState pagination = new PaginationState { ItemsPerPage = 100 };
+
+
+
+    List<(string EmpID1, string EplID2, string ProjectID, double Overlap, bool MaxOverlap)> pairs = new List<(string EmpID1, string EplID2, string ProjectID, double Overlap,bool MaxOverlap)>();
+
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        (string EmpID, string ProjectID, DateTime StartDate, DateTime EndDate) lookup;
+        var employes = new List<(string EmpID, string ProjectID, DateTime StartDate, DateTime EndDate)>();
+
+        var line  = await Http.GetStringAsync("files/employee_.csv");
+        List<string> fields = line.Split("\n").ToList();
+
+        for (int i = 0; i < fields.Count; i++)
+        {
+            if (i > 0)
+            {
+                List<string> fieldList = fields[i].Split(",").ToList();
+
+
+                var field2 = ConvertToDate(fieldList[2]);
+                var field3 = ConvertToDate(fieldList[3]);
+
+                lookup = (fieldList[0], fieldList[1], field2, field3);
+                employes.Add(lookup);
+            }
+        }
+        
+
+        var employesProject =
+        from empl in employes
+        group empl by empl.ProjectID into newGroup
+        orderby newGroup.Key
+        select newGroup;
+
+
+        foreach (var nameGroup in employesProject)
+        {
+            //Console.WriteLine($"Key: {nameGroup.Key}");
+            (string EmpID1, string EmpID2, string ProjectID, double Overlap, bool MaxOverlap) pairMax = ("", "", "", 0, true);
+
+            var arrNameGroup = nameGroup.ToList();
+            for (var i = 0; i < nameGroup.Count(); i++)
+            {
+                for (var ii = 0; ii < nameGroup.Count(); ii++)
+                {
+                    if ((i == ii) || (ii > i)) continue;
+                    (string EmpID1, string EmpID2, string ProjectID, double Overlap, bool MaxOverlap) pair = (arrNameGroup[i].EmpID, arrNameGroup[ii].EmpID, arrNameGroup[i].ProjectID, GetOverlappingDays(arrNameGroup[i].StartDate, arrNameGroup[i].EndDate, arrNameGroup[ii].StartDate, arrNameGroup[ii].EndDate),false);
+                    if (pair.Overlap > pairMax.Overlap)
+                    {
+
+                        pairMax = pair;
+                        pairMax.MaxOverlap = true;
+                    }
+                    pairs.Add(pair);
+                }
+            }
+            pairs.Add(pairMax);
+            //Console.WriteLine($" Project {pairMax.ProjectID} / Empl1 {pairMax.EmpID1} /Empl2 {pairMax.EmpID2} / Overlap in days {pairMax.Overlap}");
+        }
+    }
+
+
+
+    static double GetOverlappingDays(DateTime firstStart, DateTime firstEnd, DateTime secondStart, DateTime secondEnd)
+    {
+        DateTime maxStart = firstStart > secondStart ? firstStart : secondStart;
+        DateTime minEnd = firstEnd < secondEnd ? firstEnd : secondEnd;
+        TimeSpan interval = minEnd - maxStart;
+        double returnValue = interval > TimeSpan.FromSeconds(0) ? interval.TotalDays : 0;
+        return returnValue;
+    }
+    static DateTime ConvertToDate(string sDate)
+    {
+        DateTime CurrentDate;
+        if (!DateTime.TryParse(Convert.ToString(sDate), out CurrentDate))
+        {
+            return DateTime.UtcNow;
+        }
+
+        return CurrentDate;
+    }
+
+}
+
+
+
